@@ -456,11 +456,7 @@ def apply_completeness(mags, m50, width, seed=None):
     if mags.ndim != 1:
         raise ValueError("mags must be one-dimensional.")
 
-    completeness = completeness_function(
-        mags,
-        m50=m50,
-        width=width,
-    )
+    completeness = completeness_function(mags,m50=m50,width=width,)
 
     rng = np.random.default_rng(seed)
 
