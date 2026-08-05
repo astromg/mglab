@@ -565,8 +565,51 @@ def fit_alpha_mle(m, m1, m2):
 # overlaping moving window diagnostics
 
 def local_alpha_ratio(m, d=1.0, step=0.01, mmin=None, mmax=None):
+    """
+    Re-estimate the RGB slope alpha locally, from the count ratio in a sliding window.
 
+    At each position z the stars are counted in the two adjacent windows
+    a = N(z-d < m < z) and b = N(z < m < z+d). For a power-law luminosity function
+    phi(m) proportional to 10**(alpha*m) the ratio b/a is 10**(alpha*d), so
+
+        alpha(z) = log10(b/a) / d.
+
+    Comparing this curve with the global fit_alpha_mle value shows whether a single
+    slope is a fair description of the data or only an average over a changing one.
+
+    Parameters
+    ----------
+    m : array_like
+        Magnitudes.
+    d : float
+        Half-window width in magnitudes.
+    step : float
+        Spacing of the output grid in magnitudes.
+    mmin, mmax : float, optional
+        Range of window centres. Default to m.min() + d and m.max() - d, i.e. the
+        widest range for which both windows are fully inside the data.
+
+    Returns
+    -------
+    x : ndarray
+        Window centres.
+    alpha : ndarray
+        Local slope estimate at each centre; NaN where a window is empty.
+    sigma_alpha : ndarray
+        Poisson uncertainty of alpha, sqrt(1/a + 1/b) / (d * ln 10); NaN where alpha is.
+
+    Raises
+    ------
+    ValueError
+        If d or step is not positive.
+    """
     m = np.asarray(m)
+
+    if d <= 0:
+        raise ValueError("d must be positive.")
+
+    if step <= 0:
+        raise ValueError("step must be positive.")
 
     if mmin is None:
         mmin = m.min() + d
@@ -601,6 +644,10 @@ def local_alpha_ratio(m, d=1.0, step=0.01, mmin=None, mmax=None):
 
     return x, np.array(alpha), np.array(sigma_alpha)
 
+
+# ============================================================
+# Local Poisson Edge Detector (LPED)
+# ============================================================
 
 def local_poisson_filter(mags,d=0.5,alpha=0.3,step=0.01,sigma=0.0,method="score",):
     """
@@ -780,34 +827,139 @@ def local_poisson_filter(mags,d=0.5,alpha=0.3,step=0.01,sigma=0.0,method="score"
     return x, response, a, b
 
 
+def _mean_excess(x_segment, response_segment, threshold):
+    """
+    Average excess of the response above threshold over the magnitude range x_segment.
+
+    The segment must be contiguous on the response grid — the integral runs straight
+    from its first to its last point. Returns NaN for a segment too short to integrate.
+    """
+    if x_segment.size < 2:
+        return np.nan
+
+    span = x_segment[-1] - x_segment[0]
+
+    if span <= 0:
+        return np.nan
+
+    excess = np.maximum(response_segment - threshold, 0.0)
+
+    return np.trapezoid(excess, x_segment) / span
+
+
 def detect_local_peak(x, response, d, initial=None, search_range=None, min_height=None, min_prominence=None,
-                      local_fraction=0.7, competitor_fraction=0.5, min_peak_separation=None, response_threshold=1):
+                      local_fraction=0.7, competitor_fraction=0.5, min_peak_separation=None, response_threshold=1.0):
+    """
+    Locate the TRGB as the main peak of an edge-filter response, and grade that peak.
+
+    The position alone is not the answer: a peak is only believable when it is high and
+    alone. So besides the magnitude of the strongest maximum this returns diagnostics
+    describing its height, its shape, and how much competition it has.
+
+    Parameters
+    ----------
+    x : array_like
+        Magnitude grid the response was computed on, uniformly spaced.
+    response : array_like
+        Filter response, e.g. from local_poisson_filter.
+    d : float
+        Half-window the response was computed with, in magnitudes. Here it sets the
+        radius of the zone counted as "local" and the exclusion zone around the main
+        peak used by area_without_main.
+    initial : float, optional
+        Expected TRGB position. Together with search_range it limits the candidates.
+    search_range : float, optional
+        Half-width of the search window around initial, in magnitudes. Both this and
+        initial must be given for the restriction to apply.
+    min_height, min_prominence : float, optional
+        Height / prominence a maximum must reach to be considered at all.
+    local_fraction : float
+        A maximum closer than d to the main peak and at least this fraction of its
+        height counts towards n_local_peaks, i.e. towards local roughness.
+    competitor_fraction : float
+        A maximum farther away than twice the main peak's half-prominence width and at
+        least this fraction of its height counts towards n_competing_peaks, i.e. as an
+        independent rival detection.
+    min_peak_separation : float, optional
+        Minimum spacing between accepted maxima, in magnitudes. Closer ones are merged
+        by keeping the higher.
+    response_threshold : float
+        Response level treated as background when integrating the area diagnostics;
+        only the excess above it counts.
+
+    Returns
+    -------
+    trgb : float
+        Magnitude of the main peak.
+    diagnostics : dict
+        trgb, index
+            Position of the main peak, and its index into x.
+        peak_height, peak_prominence, peak_width_half_prominence
+            Height, prominence, and width at half prominence (in magnitudes).
+        widths_90, peak_flatness
+            Width at 10% of prominence, and its ratio to the half-prominence width;
+            a flat-topped peak scores high.
+        sharpness
+            peak_height / sqrt(peak_width_half_prominence).
+        n_local_peaks, n_competing_peaks
+            Rival maxima nearby and far away, as defined by local_fraction and
+            competitor_fraction above.
+        area_with_main, area_without_main
+            Mean response excess above response_threshold within 1 mag of the peak,
+            with the peak included and with it cut out. The second one says how much
+            structure the response has where there should be none.
+        d, step
+            The settings the response was computed with.
+
+    Raises
+    ------
+    ValueError
+        If the inputs are inconsistent or out of range, if no maximum satisfies the
+        criteria, if none falls inside the search range, or if the strongest candidate
+        has a non-positive response — the last meaning no genuine edge was found.
+    """
     x = np.asarray(x, dtype=float)
     response = np.asarray(response, dtype=float)
 
+    if x.size != response.size:
+        raise ValueError("x and response must have the same length.")
+
+    if x.size < 3:
+        raise ValueError("x must contain at least three points.")
+
+    if d <= 0:
+        raise ValueError("d must be positive.")
+
+    if not 0.0 < local_fraction <= 1.0:
+        raise ValueError("local_fraction must be in (0, 1].")
+
+    if not 0.0 < competitor_fraction <= 1.0:
+        raise ValueError("competitor_fraction must be in (0, 1].")
+
     step = np.median(np.diff(x))
 
-    distance_samples = None
-    # if min_peak_separation is None:
-    #    distance_samples = None
-    # else:
-    #    distance_samples = max(1,int(np.round(min_peak_separation / step)),)
+    if min_peak_separation is None:
+        distance_samples = None
+    elif min_peak_separation <= 0:
+        raise ValueError("min_peak_separation must be positive.")
+    else:
+        distance_samples = max(1, int(np.round(min_peak_separation / step)))
 
     peak_indices, properties = find_peaks(response, height=min_height, prominence=min_prominence,
                                           distance=distance_samples, )
 
-    # if peak_indices.size == 0:
-    #    raise ValueError("No local maximum satisfies the criteria.")
+    if peak_indices.size == 0:
+        raise ValueError("No local maximum satisfies the criteria.")
 
     # Restrict the candidate list to the requested TRGB region.
     candidate_indices = peak_indices.copy()
 
     if initial is not None and search_range is not None:
-        maska = (np.abs(x[candidate_indices] - initial) <= search_range)
-        candidate_indices = candidate_indices[maska]
+        in_search_range = (np.abs(x[candidate_indices] - initial) <= search_range)
+        candidate_indices = candidate_indices[in_search_range]
 
-    # if candidate_indices.size == 0:
-    #    raise ValueError("No local maximum found in the selected search range.")
+    if candidate_indices.size == 0:
+        raise ValueError("No local maximum found in the selected search range.")
 
     # The main peak is the highest candidate.
     main_index = candidate_indices[np.argmax(response[candidate_indices])]
@@ -840,7 +992,13 @@ def detect_local_peak(x, response, d, initial=None, search_range=None, min_heigh
     other_indices = peak_indices[peak_indices != main_index]
     other_distances = np.abs(x[other_indices] - main_x)
 
-    # Independent competitors: peaks farther than d from the main peak.
+    # Local roughness: peaks sitting within d of the main one and nearly as high. These are
+    # not rival detections, they mean the top of the response is ragged rather than clean.
+    local_mask = ((other_distances <= d) & (response[other_indices] >= local_fraction * main_height))
+
+    n_local_peaks = int(local_mask.sum())
+
+    # Independent competitors: peaks clear of the main peak's own width and nearly as high.
     # competitor_mask = ((other_distances > d) & (response[other_indices] >= competitor_fraction * main_height))
     competitor_mask = ((other_distances > 2 * width_half_prominence) & (
                 response[other_indices] >= competitor_fraction * main_height))
@@ -857,26 +1015,33 @@ def detect_local_peak(x, response, d, initial=None, search_range=None, min_heigh
     else:
         sharpness = np.nan
 
-    # pole powyzej 3 z wywaleniem glownego piku i bez
-
+    # Mean response excess above the background level within 1 mag of the peak, computed
+    # twice: over the whole window, and with the main peak cut out. The second value is a
+    # measure of how much the response wanders where nothing should be happening.
     one_mag_mask = np.abs(x - main_x) <= 1.0
-    outside_main_peak_mask = ((x - main_x) >= 2.0 * d) & one_mag_mask
 
-    x_one_mag = x[one_mag_mask]
-    r_one_mag = response[one_mag_mask]
+    area_with_main = _mean_excess(x[one_mag_mask], response[one_mag_mask], response_threshold)
 
-    x_outside_main = x[outside_main_peak_mask]
-    r_outside_main = response[outside_main_peak_mask]
+    # Cutting the peak out leaves two separate wings, so each is integrated on its own and
+    # the two are averaged, weighted by the magnitude range each of them covers.
+    bright_wing_mask = one_mag_mask & ((main_x - x) >= 2.0 * d)
+    faint_wing_mask = one_mag_mask & ((x - main_x) >= 2.0 * d)
 
-    excess_with_main = np.maximum(r_one_mag - response_threshold, 0.0)
-    excess_without_main = np.maximum(r_outside_main - response_threshold, 0.0)
+    wings = []
 
-    area_with_main = np.trapezoid(excess_with_main, x_one_mag) / np.trapezoid(np.zeros_like(r_one_mag) + 1, x_one_mag)
-    if len(r_outside_main) == 0:
-        area_without_main = np.nan
+    for wing_mask in (bright_wing_mask, faint_wing_mask):
+
+        x_wing = x[wing_mask]
+
+        if x_wing.size < 2:
+            continue
+
+        wings.append((x_wing[-1] - x_wing[0], _mean_excess(x_wing, response[wing_mask], response_threshold)))
+
+    if wings:
+        area_without_main = sum(span * value for span, value in wings) / sum(span for span, _ in wings)
     else:
-        area_without_main = np.trapezoid(excess_without_main, x_outside_main, ) / np.trapezoid(
-            np.zeros_like(r_outside_main) + 1, x_outside_main)
+        area_without_main = np.nan
 
     diagnostics = {
         "trgb": main_x,
@@ -891,6 +1056,7 @@ def detect_local_peak(x, response, d, initial=None, search_range=None, min_heigh
 
         "sharpness": sharpness,
 
+        "n_local_peaks": n_local_peaks,
         "n_competing_peaks": int(n_competing_peaks),
 
         "area_with_main": area_with_main,

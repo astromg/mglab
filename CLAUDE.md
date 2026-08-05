@@ -57,11 +57,15 @@ There are no build, lint, or test commands — nothing in the repo defines them.
   - `trgb_lib.py` — the one real shared module in the repo: RGB/AGB luminosity-function simulation,
     magnitude↔flux conversion, blending, photometric-error injection, completeness modeling, the RGB
     slope MLE fit, and the Local Poisson Edge Detector (LPED) + peak-quality diagnostics used to
-    locate the TRGB. Fully docstringed with explicit input validation (`raise ValueError` on
-    out-of-range params) — match that style if extending it.
-  - `filters.ipynb`, `lf.ipynb` — example notebooks exercising `trgb_lib.py`. `filters.ipynb` still
-    has older Sobel-filter/GLOESS/MLA edge-detection code defined inline rather than in the library —
-    those are earlier experiments, not the current method (MLE + LPED).
+    locate the TRGB. Also holds the older Sobel/GLOESS/MLA detectors, kept for comparison. The
+    simulation half is docstringed with explicit `raise ValueError` input validation — that is the
+    target style; the detection half has drifted from it (see "Current state").
+  - `lf.ipynb` — walk-through of the simulation chain (RGB → AGB → blending → errors →
+    completeness), one plot per stage. `filters.ipynb` — walk-through of the detection chain on a
+    single simulated LF.
+  - `d_param_mc.ipynb` — Monte Carlo study of the LPED `d` (half-window) parameter: repeats the
+    simulate→detect chain over many realizations for a set of `d` values and compares peak height /
+    TRGB error.
   - `mi0.ipynb` — unrelated to the simulation/detection code; compiles literature TRGB calibration
     values into forest plots.
 - `data/` — gitignored local data dir; don't assume its contents are reproducible or committed.
@@ -75,3 +79,81 @@ There are no build, lint, or test commands — nothing in the repo defines them.
 - `trgb_lib.py` is imported by notebooks via `from trgb_lib import *` with the notebook's CWD on
   `sys.path` (no package install) — keep it a flat, dependency-light module (currently only
   `numpy`/`math`) so that pattern keeps working.
+
+## What the TRGB work is for
+
+`trgb/` is a **laboratory**, not the end product. The goal is to try out and compare TRGB detection
+methods, and — just as importantly — to find good ways of **estimating the detection error**. That is
+why several "diagnostics" exist side by side: they are under active development and are expected to
+change, be replaced, or be thrown out.
+
+The main instrument is **Monte Carlo**: simulate a luminosity function with known input parameters,
+run detection on it, repeat over many realizations, and see how the recovered TRGB and its error
+behave as a function of the input data. One notebook per MC case; so far there is one,
+`d_param_mc.ipynb` (choice of the LPED half-window `d`).
+
+Two consequences that should drive design decisions here:
+
+- **`trgb_lib.py` is the deliverable.** When the method settles, the library gets lifted out of this
+  repo into a separate application that analyses real data. The notebooks stay behind. So the library
+  must remain self-contained, portable and free of notebook-specific assumptions — and analysis logic
+  belongs in it, not in a cell.
+- **The notebooks are the experiments.** Each one is a case study, kept separate on purpose. Don't
+  merge them or generalize one into a framework unless asked.
+
+## How we work here
+
+- **Language.** The user talks Polish; reply in Polish. Everything written to a file — this document,
+  READMEs, docstrings, code comments, commit messages — is in **English**.
+- **One session = one topic.** The user closes the session when the topic is done. There is no
+  running log of sessions: "Current state" below is the only status carry-over, and it is
+  **rewritten in place**, never appended to. At the end of a session (the user says e.g. "podsumuj i
+  zapisz") update it to the new reality, drop what is no longer true, keep it to a few bullets. Git
+  history is the record of what changed; that section is the record of where things stand.
+- **The user makes the commits.** Never run `git commit`/`git push`. Say what is done and leave it
+  staged-or-not for them.
+- **This file is editable without asking.** Update `CLAUDE.md` whenever something here goes stale.
+- **Running code is allowed** without asking — run notebook cells or scripts to verify a change.
+  Read-only shell commands are pre-approved in `.claude/settings.local.json`.
+- **Missing packages:** install them yourself with `uv add <package>`, no need to ask.
+- **Stay in scope.** Work is scoped to `trgb/` unless the user says otherwise. Problems noticed
+  elsewhere in the repo get mentioned, not fixed (e.g. `syntax_tpg.ipynb` has unresolved merge
+  markers — leave it alone).
+
+## Code style
+
+- Match the user's own style; parts of this code came from an LLM, parts are hand-written, and the
+  hand-written parts win as the reference. Notably: **do not break a simple statement across several
+  lines** just because it is long — if it is one straightforward command, keep it on one line.
+- Write code the user can read at a glance. **If a method or algorithm is not obvious, ask before
+  using it** — an unfamiliar clever trick in this codebase is a defect, not a feature.
+- Follow the existing conventions of `trgb/trgb_lib.py`: full docstrings and explicit `raise
+  ValueError` input validation.
+- **Don't silently break what already works.** Renaming a function, reordering or renaming its
+  arguments, or changing what it returns breaks the user's notebooks and invalidates results they
+  have already computed and understood. Propose such a change and wait for a yes; the same goes for
+  quietly swapping the method behind an existing function.
+
+## Current state (last updated: 2026-08-06)
+
+- **Only the LPED chain is under active development**: `fit_alpha_mle` → `local_poisson_filter` →
+  `detect_local_peak`. Sobel / GLOESS / MLA sit in `trgb_lib.py` for comparison only — don't spend
+  effort on them.
+- Open question: the LPED half-window `d`. `d_param_mc.ipynb` runs the Monte Carlo over
+  `d ∈ {0.05 … 0.40}`; no conclusion recorded yet.
+- `detect_local_peak` was cleaned up on 2026-08-06: docstring added, the commented-out
+  `raise ValueError` guards restored, `min_peak_separation` and `local_fraction` now actually do
+  something (the latter feeds a new `n_local_peaks` diagnostic), and `area_without_main` changed
+  from a one-sided to a two-sided exclusion zone around the peak, integrated per wing. **Its values
+  are therefore not comparable with MC runs from before that date.**
+- Documentation pass is **half finished**. Done: `trgb/README.md` rewritten (it had described
+  diagnostics that no longer exist), library docstrings. Still to do:
+  - `d_param_mc.ipynb` — records a `outside_area_fraction` column that no diagnostic produces, so it
+    is always NaN; the final plot has no description; Polish comment in the first cell.
+  - `filters.ipynb` — unused `detect_local_peak2` copy in cell 6; the `d`-loop prints 11 unlabelled
+    columns; unexplained `scale = sqrt(0.1)/sqrt(d)`.
+  - `lf.ipynb` — redefines `random_seed()` locally and reuses one seed for every stage; plot titles
+    on the AGB and RGB+AGB panels both say "RGB Luminosity Function"; `10` hard-coded instead of
+    `m_trgb`; `m` silently changes meaning from RGB to RGB+AGB mid-notebook.
+  - `mi0.ipynb` — the JWST rows are placeholders (`# przykład: wpisz swoje...`), not adopted
+    literature values, but the saved figure looks like a real compilation.
