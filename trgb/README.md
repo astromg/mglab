@@ -8,13 +8,34 @@ repeat over many realizations, and study how the recovered tip and its uncertain
 both a good detector and a good **error estimate** for it. `trgb_lib.py` is the deliverable — it will
 eventually be lifted out into an application for real data; the notebooks stay here.
 
+## What is to be studied
+
+The plan, in the order it is meant to be worked through. One notebook per case, kept separate;
+`d_param_mc.ipynb` is the template — every realization is analysed with **all** values of the swept
+parameter, so the comparison is paired rather than between independent runs.
+
+1. **How the diagnostics depend on the simulation parameters.** Sweep one at a time with the rest
+   held fixed — mainly `N_rgb_1mag`, `R` (the AGB-to-RGB ratio, `N_agb_1mag / N_rgb_1mag`) and
+   `photometric_error`. The question is the same one `d_param_mc.ipynb` asks about `d`: do two
+   realizations that differ only in that parameter give measurably different diagnostics?
+2. **Combinations of two parameters.** Once the one-dimensional behaviour is known, look for
+   interactions — e.g. `R` against `photometric_error` as two-dimensional heatmaps of the bias and
+   of the error.
+3. **The method parameters last**: `d`, the smoothing `sigma`, and the rest. They are settings we
+   choose, so it only makes sense to tune them once it is clear what the data itself does.
+4. **Pick the diagnostic that models the error best.** This is the point of the whole exercise: a
+   quantity measurable without knowing the truth, from which the uncertainty of a detection can be
+   predicted.
+5. **Check what bootstrap does and does not capture.** It should reproduce the noise-driven part of
+   the error; the expectation to test is that it stays blind to the biases.
+
 ## Files
 
 | File | What it is |
 | --- | --- |
 | `trgb_lib.py` | The library. All reusable logic: LF simulation, slope fit, detection, diagnostics. |
 | `lf.ipynb` | Walk-through of the **simulation** side, step by step: RGB → AGB → blending → photometric errors → completeness, with a plot after each stage. |
-| `filters.ipynb` | Walk-through of the **detection** side on one simulated LF: MLE slope fit, local slope check, then LPED with the peak diagnostics. |
+| `filters.ipynb` | Walk-through of the **detection** side on one simulated LF: MLE slope fit, local slope check, then LPED (score statistic) with the peak diagnostics drawn where they are measured. |
 | `d_param_mc.ipynb` | Monte Carlo case study: how the LPED half-window `d` affects the TRGB error. One notebook per MC case; this is the first. |
 | `mi0.ipynb` | Unrelated to the above — compiles published `M_TRGB` calibrations into forest plots. |
 | `TRGB_calibrations_forest.png`, `TRGB_space_telescopes_forest.png`, `trgb_MIb_updated.png` | Figures produced by `mi0.ipynb`. |
@@ -80,13 +101,32 @@ and alone*, so most entries measure either height or isolation.
 | --- | --- |
 | `trgb`, `index` | Position of the main peak (magnitude, and index into `x`). |
 | `peak_height` | Response value at the peak. |
-| `peak_prominence` | `scipy` prominence of the peak. |
-| `peak_width_half_prominence` | Width at half prominence, in magnitudes. |
-| `widths_90`, `peak_flatness` | Width at 10% of prominence, and the ratio `width_90 / width_half_prominence` — a flat-topped peak scores high. |
-| `sharpness` | `peak_height / sqrt(peak_width_half_prominence)`. |
-| `n_competing_peaks` | Rival peaks: further than `2 * peak_width_half_prominence` away and at least `competitor_fraction` of the main height. |
-| `area_with_main`, `area_without_main` | Mean response excess above `response_threshold` within ±1 mag of the peak — once including the peak, once excluding it (the region `x - trgb >= 2d`). The second measures how noisy the background of the response is. |
+| `peak_prominence`, `peak_base` | `scipy` prominence of the peak, and the level it rises from (`peak_height - peak_prominence`). |
+| `peak_width_half`, `peak_width_90` | Widths at 0.5 and at 0.9 of the peak height, in magnitudes. |
+| `peak_flatness` | `peak_width_90 / peak_width_half` — a flat-topped peak scores high. |
+| `sharpness` | `peak_height / sqrt(peak_width_half)`. |
+| `n_local_peaks` | Ragged top: rival peaks within `d` of the main one and at least `local_fraction` of its height. Not competing detections — a sign that the summit is noisy. |
+| `n_competing_peaks` | Independent rivals: further than `2 * peak_width_half` away and at least `competitor_fraction` of the main height. |
+| `area_main` | Mean response excess above `response_threshold` over the peak zone, `|m - trgb| < d`. |
+| `area_outside_bright`, `area_outside_faint`, `area_outside` | The same, over the two wings left inside a ±1 mag window once the peak zone is cut out: brighter than the tip, fainter than it, and the two together weighted by the range each covers. They measure how much structure the response has where there should be none. The sides are reported apart on purpose — the AGB sits on the bright one, the RGB on the faint one, so an excess there does not mean the same thing. |
+| `outside_area_fraction` | `area_outside / area_main` — how the background compares with the peak itself. Near 0 for a clean single peak, around 1 when the wings are as busy as the peak. |
+| `peak_width_half_x1/x2/level`, `peak_width_90_x1/x2/level` | Where the two widths actually sit: endpoints on the magnitude grid and the response level they are measured at. For drawing them, not for grading the peak. |
 | `d`, `step` | The settings the response was computed with. |
+
+Three things to keep in mind when reading these.
+
+**Widths are measured from zero**, at a fraction of the peak height — the plain FWHM idea, computed
+by walking away from the summit until the response falls to the level and interpolating between the
+two samples that straddle it. Prominence is reported but no longer defines any width: it reaches
+down to distant minima, so it describes the response as a whole rather than the peak.
+
+**The area diagnostics depend on `d` by construction.** The peak zone is `±d` inside a fixed ±1 mag
+window, so as `d` grows the peak zone widens and the wings shrink. Part of any trend against `d` is
+that geometry, not a cleaner response.
+
+**`peak_height` is not comparable across `d`.** The window holds `∝ d` stars, so the response of a
+given edge grows roughly as `sqrt(d)`. Comparing detections computed with different `d` needs either
+a `sqrt(d)` rescaling or `sharpness`, which carries that factor implicitly (`peak_width_half ∝ d`).
 
 ## Luminosity function model
 

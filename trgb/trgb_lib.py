@@ -847,6 +847,42 @@ def _mean_excess(x_segment, response_segment, threshold):
     return np.trapezoid(excess, x_segment) / span
 
 
+def _width_at_level(x, response, index, level):
+    """
+    Width of the peak sitting at index, measured where the response falls to level.
+
+    Walks away from the top in both directions until the response drops to level, and
+    interpolates linearly between the two samples straddling the crossing. A side that
+    never crosses is cut at the end of the grid, so the width is a lower limit there.
+
+    Returns
+    -------
+    width, x1, x2 : float
+        Width in the units of x, and the two crossing points, bright side first.
+    """
+    left = index
+
+    while left > 0 and response[left] > level:
+        left -= 1
+
+    if response[left] <= level:
+        x1 = np.interp(level, [response[left], response[left + 1]], [x[left], x[left + 1]])
+    else:
+        x1 = x[0]
+
+    right = index
+
+    while right < x.size - 1 and response[right] > level:
+        right += 1
+
+    if response[right] <= level:
+        x2 = np.interp(level, [response[right], response[right - 1]], [x[right], x[right - 1]])
+    else:
+        x2 = x[-1]
+
+    return x2 - x1, x1, x2
+
+
 def detect_local_peak(x, response, d, initial=None, search_range=None, min_height=None, min_prominence=None,
                       local_fraction=0.7, competitor_fraction=0.5, min_peak_separation=None, response_threshold=1.0):
     """
@@ -864,8 +900,8 @@ def detect_local_peak(x, response, d, initial=None, search_range=None, min_heigh
         Filter response, e.g. from local_poisson_filter.
     d : float
         Half-window the response was computed with, in magnitudes. Here it sets the
-        radius of the zone counted as "local" and the exclusion zone around the main
-        peak used by area_without_main.
+        radius of the zone counted as "local", and the radius of the peak zone that
+        separates area_main from the two wings.
     initial : float, optional
         Expected TRGB position. Together with search_range it limits the candidates.
     search_range : float, optional
@@ -894,20 +930,36 @@ def detect_local_peak(x, response, d, initial=None, search_range=None, min_heigh
     diagnostics : dict
         trgb, index
             Position of the main peak, and its index into x.
-        peak_height, peak_prominence, peak_width_half_prominence
-            Height, prominence, and width at half prominence (in magnitudes).
-        widths_90, peak_flatness
-            Width at 10% of prominence, and its ratio to the half-prominence width;
-            a flat-topped peak scores high.
+        peak_height, peak_prominence, peak_base
+            Height of the main peak, its prominence, and the level it rises from,
+            peak_height - peak_prominence.
+        peak_width_half, peak_width_90
+            Width at half the peak height and width at 90% of it, both in magnitudes
+            and both counted from zero — the plain FWHM idea, prominence plays no part.
+        peak_width_half_x1/x2/level, peak_width_90_x1/x2/level
+            Where those two widths actually sit: their endpoints on the magnitude grid
+            and the response level they are measured at. For drawing them, not for
+            grading the peak.
+        peak_flatness
+            peak_width_90 / peak_width_half; a flat-topped peak scores high.
         sharpness
-            peak_height / sqrt(peak_width_half_prominence).
+            peak_height / sqrt(peak_width_half).
         n_local_peaks, n_competing_peaks
             Rival maxima nearby and far away, as defined by local_fraction and
             competitor_fraction above.
-        area_with_main, area_without_main
-            Mean response excess above response_threshold within 1 mag of the peak,
-            with the peak included and with it cut out. The second one says how much
-            structure the response has where there should be none.
+        area_main
+            Mean response excess above response_threshold over the peak zone,
+            |m - trgb| < d.
+        area_outside_bright, area_outside_faint, area_outside
+            The same mean excess over the two wings left inside a 1 mag window once the
+            peak zone is cut out — brighter than the tip, fainter than it, and the two
+            together weighted by the magnitude range each covers. They say how much
+            structure the response has where there should be none, and the sides are
+            reported apart because the AGB sits on one of them and the RGB on the other.
+        outside_area_fraction
+            area_outside / area_main, i.e. how the background compares with the peak.
+            Near 0 for a clean single peak, around 1 when the wings are as busy as the
+            peak. NaN when the peak carries no excess at all.
         d, step
             The settings the response was computed with.
 
@@ -978,15 +1030,21 @@ def detect_local_peak(x, response, d, initial=None, search_range=None, min_heigh
 
     main_prominence = prominences[0]
 
-    widths, _, left_ips, right_ips = peak_widths(response, np.array([main_index]), rel_height=0.5,
-                                                 prominence_data=(prominences, left_bases, right_bases), )
-    width_half_prominence = widths[0] * step
+    # Both widths are measured at a fraction of the peak height counted from zero, the plain
+    # FWHM idea, so that the shape of the peak is read off the response itself. Prominence
+    # remains a diagnostic of its own, but it no longer sets the widths.
+    width_half_level = 0.5 * main_height
 
-    widths_90, _, left_ips_90, right_ips_90 = peak_widths(response, np.array([main_index]), rel_height=0.1,
-                                                          prominence_data=(prominences, left_bases, right_bases), )
-    width_90 = widths_90[0] * step
+    width_90_level = 0.9 * main_height
 
-    peak_flatness = width_90 / width_half_prominence
+    width_half, width_half_x1, width_half_x2 = _width_at_level(x, response, main_index, width_half_level)
+
+    width_90, width_90_x1, width_90_x2 = _width_at_level(x, response, main_index, width_90_level)
+
+    if width_half > 0:
+        peak_flatness = width_90 / width_half
+    else:
+        peak_flatness = np.nan
 
     # All detected peaks and their distances from the main peak.
     other_indices = peak_indices[peak_indices != main_index]
@@ -1000,7 +1058,7 @@ def detect_local_peak(x, response, d, initial=None, search_range=None, min_heigh
 
     # Independent competitors: peaks clear of the main peak's own width and nearly as high.
     # competitor_mask = ((other_distances > d) & (response[other_indices] >= competitor_fraction * main_height))
-    competitor_mask = ((other_distances > 2 * width_half_prominence) & (
+    competitor_mask = ((other_distances > 2 * width_half) & (
                 response[other_indices] >= competitor_fraction * main_height))
 
     competitor_indices = other_indices[competitor_mask]
@@ -1008,9 +1066,9 @@ def detect_local_peak(x, response, d, initial=None, search_range=None, min_heigh
     n_competing_peaks = competitor_indices.size
 
     # A simple sharpness measure. This is diagnostic, not an error.
-    if width_half_prominence > 0:
-        # sharpness = main_prominence / np.sqrt(width_half_prominence)
-        sharpness = main_height / np.sqrt(width_half_prominence)
+    if width_half > 0:
+        # sharpness = main_prominence / np.sqrt(width_half)
+        sharpness = main_height / np.sqrt(width_half)
 
     else:
         sharpness = np.nan
@@ -1020,28 +1078,44 @@ def detect_local_peak(x, response, d, initial=None, search_range=None, min_heigh
     # measure of how much the response wanders where nothing should be happening.
     one_mag_mask = np.abs(x - main_x) <= 1.0
 
-    area_with_main = _mean_excess(x[one_mag_mask], response[one_mag_mask], response_threshold)
+    main_mask = np.abs(x - main_x) < d
 
-    # Cutting the peak out leaves two separate wings, so each is integrated on its own and
-    # the two are averaged, weighted by the magnitude range each of them covers.
-    bright_wing_mask = one_mag_mask & ((main_x - x) >= 2.0 * d)
-    faint_wing_mask = one_mag_mask & ((x - main_x) >= 2.0 * d)
+    # The two wings are kept apart on purpose. Brighter than the tip sits the AGB, fainter
+    # than it the RGB, so the structure the response picks up there is not the same thing
+    # measured twice — an excess on one side means something different than on the other.
+    bright_wing_mask = one_mag_mask & ((main_x - x) >= d)
+    faint_wing_mask = one_mag_mask & ((x - main_x) >= d)
 
+    area_main = _mean_excess(x[main_mask], response[main_mask], response_threshold)
+
+    area_outside_bright = _mean_excess(x[bright_wing_mask], response[bright_wing_mask], response_threshold)
+
+    area_outside_faint = _mean_excess(x[faint_wing_mask], response[faint_wing_mask], response_threshold)
+
+    # Both wings together, averaged by the magnitude range each of them covers. A wing too
+    # short to integrate is left out rather than dragged in as a NaN.
     wings = []
 
-    for wing_mask in (bright_wing_mask, faint_wing_mask):
+    for wing_mask, wing_value in ((bright_wing_mask, area_outside_bright), (faint_wing_mask, area_outside_faint)):
 
         x_wing = x[wing_mask]
 
         if x_wing.size < 2:
             continue
 
-        wings.append((x_wing[-1] - x_wing[0], _mean_excess(x_wing, response[wing_mask], response_threshold)))
+        wings.append((x_wing[-1] - x_wing[0], wing_value))
 
     if wings:
-        area_without_main = sum(span * value for span, value in wings) / sum(span for span, _ in wings)
+        area_outside = sum(span * value for span, value in wings) / sum(span for span, _ in wings)
     else:
-        area_without_main = np.nan
+        area_outside = np.nan
+
+    # How the background compares with the peak itself. Both are mean excesses per magnitude,
+    # which is what makes the ratio meaningful. A peak with no excess at all gives no fraction.
+    if area_main > 0:
+        outside_area_fraction = area_outside / area_main
+    else:
+        outside_area_fraction = np.nan
 
     diagnostics = {
         "trgb": main_x,
@@ -1049,9 +1123,18 @@ def detect_local_peak(x, response, d, initial=None, search_range=None, min_heigh
 
         "peak_height": main_height,
         "peak_prominence": main_prominence,
-        "peak_width_half_prominence": width_half_prominence,
+        "peak_base": main_height - main_prominence,
 
-        "widths_90": widths_90,
+        "peak_width_half": width_half,
+        "peak_width_half_x1": width_half_x1,
+        "peak_width_half_x2": width_half_x2,
+        "peak_width_half_level": width_half_level,
+
+        "peak_width_90": width_90,
+        "peak_width_90_x1": width_90_x1,
+        "peak_width_90_x2": width_90_x2,
+        "peak_width_90_level": width_90_level,
+
         "peak_flatness": peak_flatness,
 
         "sharpness": sharpness,
@@ -1059,8 +1142,11 @@ def detect_local_peak(x, response, d, initial=None, search_range=None, min_heigh
         "n_local_peaks": n_local_peaks,
         "n_competing_peaks": int(n_competing_peaks),
 
-        "area_with_main": area_with_main,
-        "area_without_main": area_without_main,
+        "area_main": area_main,
+        "area_outside_bright": area_outside_bright,
+        "area_outside_faint": area_outside_faint,
+        "area_outside": area_outside,
+        "outside_area_fraction": outside_area_fraction,
 
         "d": d,
         "step": step,

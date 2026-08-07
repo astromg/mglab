@@ -134,24 +134,32 @@ Two consequences that should drive design decisions here:
   have already computed and understood. Propose such a change and wait for a yes; the same goes for
   quietly swapping the method behind an existing function.
 
-## Current state (last updated: 2026-08-06)
+## Current state (last updated: 2026-08-07)
 
 - **Only the LPED chain is under active development**: `fit_alpha_mle` → `local_poisson_filter` →
   `detect_local_peak`. Sobel / GLOESS / MLA sit in `trgb_lib.py` for comparison only — don't spend
   effort on them.
-- Open question: the LPED half-window `d`. `d_param_mc.ipynb` runs the Monte Carlo over
-  `d ∈ {0.05 … 0.40}`; no conclusion recorded yet.
-- `detect_local_peak` was cleaned up on 2026-08-06: docstring added, the commented-out
-  `raise ValueError` guards restored, `min_peak_separation` and `local_fraction` now actually do
-  something (the latter feeds a new `n_local_peaks` diagnostic), and `area_without_main` changed
-  from a one-sided to a two-sided exclusion zone around the peak, integrated per wing. **Its values
-  are therefore not comparable with MC runs from before that date.**
-- Documentation pass is **half finished**. Done: `trgb/README.md` rewritten (it had described
-  diagnostics that no longer exist), library docstrings. Still to do:
-  - `d_param_mc.ipynb` — records a `outside_area_fraction` column that no diagnostic produces, so it
-    is always NaN; the final plot has no description; Polish comment in the first cell.
-  - `filters.ipynb` — unused `detect_local_peak2` copy in cell 6; the `d`-loop prints 11 unlabelled
-    columns; unexplained `scale = sqrt(0.1)/sqrt(d)`.
+- **The plan for the whole study now lives in `trgb/README.md`** ("What is to be studied"): sweep the
+  simulation parameters one at a time, then in pairs as heatmaps, then the method parameters, then
+  pick the diagnostic that best predicts the error, then check what bootstrap misses. Follow that
+  order unless the user says otherwise.
+- **The open question is still the half-window `d`**, and it has grown into the question of a
+  `d`-independent quality statistic. `peak_height` scales as `sqrt(d)`, so raw heights don't compare
+  across `d`; `d_param_mc.ipynb` now records a hand-scaled `peak_height_scale` (`peak_height *
+  sqrt(0.1/d)`) next to `sharpness`, which carries the same factor implicitly. The test is whether
+  either of them collapses the `absolute_error`-vs-quality relation for all `d` onto one curve. No
+  conclusion recorded yet.
+- **`detect_local_peak` was reworked on 2026-08-06/07, so anything computed before that date is not
+  comparable with what it returns now.** Every diagnostic except `peak_height` and `peak_prominence`
+  either changed meaning or changed name; `trgb/README.md` documents the current set. Git history has
+  the details. What matters going forward: widths are plain fractions of the peak height (no
+  prominence), the peak zone is `±d`, and the two wings are reported apart.
+- Known wart, agreed but not fixed: the area diagnostics are tied to `d` inside a fixed ±1 mag window
+  (peak zone `±d`, wings the rest), so part of any trend against `d` is geometry, not a cleaner
+  response. Needs a `d`-independent geometry before the areas can decide anything about `d`.
+- Documentation is current as of this date: `trgb/README.md`, library docstrings, the LPED cells and
+  the final plot of `filters.ipynb`, the final plot of `d_param_mc.ipynb`. Still to do:
+  - `d_param_mc.ipynb` — Polish comment in the first cell.
   - `lf.ipynb` — redefines `random_seed()` locally and reuses one seed for every stage; plot titles
     on the AGB and RGB+AGB panels both say "RGB Luminosity Function"; `10` hard-coded instead of
     `m_trgb`; `m` silently changes meaning from RGB to RGB+AGB mid-notebook.
