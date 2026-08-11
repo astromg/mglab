@@ -16,8 +16,10 @@ parameter, so the comparison is paired rather than between independent runs.
 
 1. **How the diagnostics depend on the simulation parameters.** Sweep one at a time with the rest
    held fixed — mainly `N_rgb_1mag`, `R` (the AGB-to-RGB ratio, `N_agb_1mag / N_rgb_1mag`) and
-   `photometric_error`. The question is the same one `d_param_mc.ipynb` asks about `d`: do two
-   realizations that differ only in that parameter give measurably different diagnostics?
+   `photometric_error`. Given the conclusion in the next section, the sharp form of the question is
+   not whether the mean error moves with the parameter — it must — but whether the **quality → error
+   curve** moves with it. If the curve is the same for every parameter set, the error estimate is
+   universal; if it shifts, the estimate needs to know the parameters as well.
 2. **Combinations of two parameters.** Once the one-dimensional behaviour is known, look for
    interactions — e.g. `R` against `photometric_error` as two-dimensional heatmaps of the bias and
    of the error.
@@ -29,6 +31,51 @@ parameter, so the comparison is paired rather than between independent runs.
 5. **Check what bootstrap does and does not capture.** It should reproduce the noise-driven part of
    the error; the expectation to test is that it stays blind to the biases.
 
+## What is already established
+
+**A diagnostic can rank single realizations, not just classes of models.** `d_param_mc.ipynb` runs
+1000 realizations of *one* parameter set (`N_rgb_1mag = 200`, `R = 0.2`, `photometric_error = 0.03`),
+so the only thing that differs between them is where the stars happened to land. Even there,
+`peak_height` — rescaled by `sqrt(d)` — correlates with `trgb_error`: the realizations that produce a
+taller peak are the ones whose tip is recovered better. That makes the mean-and-scatter curve in bins
+of the diagnostic something more than a summary of the class. It is a **conditional** error estimate,
+read off a single detection without knowing the truth, which is what point 4 above is after.
+
+It also says something about what `peak_height` is. The `score` response at the edge is close to a
+significance of the bright/faint count contrast, i.e. a local signal-to-noise, and a localization
+error that falls as signal-to-noise rises is the expected behaviour rather than a surprise. Deriving
+that expected form and testing the measured relation against it would turn a correlation into a
+prediction.
+
+What this does *not* settle, and has to be checked before any of it is quoted as an error bar:
+
+- **Only the noise-driven part of the error can appear this way.** At fixed global parameters the
+  bias is common to every realization, so within a class a diagnostic can only order them. Read the
+  per-bin *mean* offset as well as the scatter: if the mean moves with the diagnostic too, part of
+  the bias is being tracked, which would be a stronger result than expected.
+- **The relation is still per-`d`.** One calibration curve covering all `d` is exactly what a
+  `d`-independent quality statistic would buy; until there is one, every `d` has its own curve.
+- **Dropped detections truncate the interesting tail.** Failures go to the counters, not to
+  `results`, and they are the low-quality, large-error cases — so the weak end of the calibration
+  reads better than it is.
+- **Does it beat counting stars?** `peak_height` is worth its complexity only if it predicts the
+  error better than the realized star count near the tip does, and that count is just as measurable.
+  `local_poisson_filter` returns `counts_bright` / `counts_faint`, so the comparison is cheap.
+- **The peak is searched near the truth.** `initial=m_trgb`, `search_range=0.5` is a truth-informed
+  constraint that real data does not have. The relation has to survive a search that does not start
+  from the answer.
+
+**The core of the error and its catastrophic tail are measured apart.** A single standard deviation
+conflates the two: a bin of realizations can be wide because every detection is a little off, or
+because most are fine and a few landed on the wrong feature entirely, and those are different
+failures with different cures. So `global_param_mc.ipynb` describes every bin twice — median with a
+16th-to-84th percentile interval, which ignores how far the worst detections went, and mean with the
+standard deviation, which does not. The gap between the two envelopes is the tail, and the gap between
+mean and median says which side it is on. First look at `N_1mag`, from one run and not yet a
+conclusion: below roughly 200 stars the standard deviation runs 1.5 to 2 times the percentile
+interval, while the two `photometric_error` scenarios lie on top of each other in the tail and apart
+in the core — which would put the catastrophes down to sampling rather than photometry.
+
 ## Files
 
 | File | What it is |
@@ -37,6 +84,7 @@ parameter, so the comparison is paired rather than between independent runs.
 | `lf.ipynb` | Walk-through of the **simulation** side, step by step: RGB → AGB → blending → photometric errors → completeness, with a plot after each stage. |
 | `filters.ipynb` | Walk-through of the **detection** side on one simulated LF: MLE slope fit, local slope check, then LPED (score statistic) with the peak diagnostics drawn where they are measured. |
 | `d_param_mc.ipynb` | Monte Carlo case study: how the LPED half-window `d` affects the TRGB error. One notebook per MC case; this is the first. |
+| `global_param_mc.ipynb` | Monte Carlo case study of the **simulation** parameters. A scenario says of each of `N_1mag`, `R`, `photometric_error` whether it is held at a number or drawn from a `[lo, hi]` range, and the scenarios share the realizations, so they are paired and go on one plot in different colours. Per bin it shows the percentile core and the standard deviation apart. |
 | `mi0.ipynb` | Unrelated to the above — compiles published `M_TRGB` calibrations into forest plots. |
 | `TRGB_calibrations_forest.png`, `TRGB_space_telescopes_forest.png`, `trgb_MIb_updated.png` | Figures produced by `mi0.ipynb`. |
 

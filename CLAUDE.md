@@ -66,6 +66,9 @@ There are no build, lint, or test commands — nothing in the repo defines them.
   - `d_param_mc.ipynb` — Monte Carlo study of the LPED `d` (half-window) parameter: repeats the
     simulate→detect chain over many realizations for a set of `d` values and compares peak height /
     TRGB error.
+  - `global_param_mc.ipynb` — the same idea for the simulation parameters: a scenario says of each of
+    `N_1mag`, `R`, `photometric_error` whether it is held at a number or drawn from a `[lo, hi]`
+    range, all scenarios share the realizations, and each is a colour on the plot.
   - `mi0.ipynb` — unrelated to the simulation/detection code; compiles literature TRGB calibration
     values into forest plots.
 - `data/` — gitignored local data dir; don't assume its contents are reproducible or committed.
@@ -89,8 +92,9 @@ change, be replaced, or be thrown out.
 
 The main instrument is **Monte Carlo**: simulate a luminosity function with known input parameters,
 run detection on it, repeat over many realizations, and see how the recovered TRGB and its error
-behave as a function of the input data. One notebook per MC case; so far there is one,
-`d_param_mc.ipynb` (choice of the LPED half-window `d`).
+behave as a function of the input data. One notebook per MC case; so far there are two,
+`d_param_mc.ipynb` (choice of the LPED half-window `d`) and `global_param_mc.ipynb` (the simulation
+parameters `N_1mag`, `R`, `photometric_error`).
 
 Two consequences that should drive design decisions here:
 
@@ -134,21 +138,31 @@ Two consequences that should drive design decisions here:
   have already computed and understood. Propose such a change and wait for a yes; the same goes for
   quietly swapping the method behind an existing function.
 
-## Current state (last updated: 2026-08-07)
+## Current state (last updated: 2026-08-11)
 
 - **Only the LPED chain is under active development**: `fit_alpha_mle` → `local_poisson_filter` →
   `detect_local_peak`. Sobel / GLOESS / MLA sit in `trgb_lib.py` for comparison only — don't spend
   effort on them.
-- **The plan for the whole study now lives in `trgb/README.md`** ("What is to be studied"): sweep the
-  simulation parameters one at a time, then in pairs as heatmaps, then the method parameters, then
-  pick the diagnostic that best predicts the error, then check what bootstrap misses. Follow that
-  order unless the user says otherwise.
-- **The open question is still the half-window `d`**, and it has grown into the question of a
-  `d`-independent quality statistic. `peak_height` scales as `sqrt(d)`, so raw heights don't compare
-  across `d`; `d_param_mc.ipynb` now records a hand-scaled `peak_height_scale` (`peak_height *
-  sqrt(0.1/d)`) next to `sharpness`, which carries the same factor implicitly. The test is whether
-  either of them collapses the `absolute_error`-vs-quality relation for all `d` onto one curve. No
-  conclusion recorded yet.
+- **The plan and the results so far live in `trgb/README.md`** — "What is to be studied" for the
+  order of work, "What is already established" for what is settled. Follow that order unless the user
+  says otherwise.
+- **Work has moved to the simulation parameters** (point 1 of the plan) in the new
+  `global_param_mc.ipynb`. The `d` / `sigma` question is parked by the user's decision and comes back
+  in a later session; what `d_param_mc.ipynb` was testing — whether `peak_height_scale` or
+  `sharpness` collapses the error-vs-quality relation for all `d` onto one curve — still has no
+  conclusion recorded.
+- **The conclusion that reframed the study**, written up in the README: at fixed global parameters the
+  diagnostics still order *individual realizations* by their error, so the binned curve is a
+  conditional error estimate rather than a summary of the parameter class. That turns point 1 from
+  "does the mean error move with the parameter" into "does the quality → error curve move, or is it
+  invariant". The README lists what it does not yet settle — bias vs noise, per-`d` calibration,
+  dropped detections, whether it beats plain star counts, and the truth-informed search window.
+- **Error is now read as core plus catastrophic tail**, not as one number: percentile interval against
+  standard deviation, drawn apart on the same plot. This should stay the convention in later MC
+  notebooks.
+- `R` means `N_agb_1mag / N_rgb_1mag` (so `R = 0.2` is 20 % AGB contamination), defined in
+  `trgb/README.md`. Asked about in this session and deliberately left as it is, even though the same
+  letter names the filter's count ratio `10**(alpha*d)` in `trgb_lib.py` docstrings.
 - **`detect_local_peak` was reworked on 2026-08-06/07, so anything computed before that date is not
   comparable with what it returns now.** Every diagnostic except `peak_height` and `peak_prominence`
   either changed meaning or changed name; `trgb/README.md` documents the current set. Git history has
@@ -158,8 +172,10 @@ Two consequences that should drive design decisions here:
   (peak zone `±d`, wings the rest), so part of any trend against `d` is geometry, not a cleaner
   response. Needs a `d`-independent geometry before the areas can decide anything about `d`.
 - Documentation is current as of this date: `trgb/README.md`, library docstrings, the LPED cells and
-  the final plot of `filters.ipynb`, the final plot of `d_param_mc.ipynb`. Still to do:
-  - `d_param_mc.ipynb` — Polish comment in the first cell.
+  the final plot of `filters.ipynb`, the final plot of `d_param_mc.ipynb`, and `global_param_mc.ipynb`
+  throughout. Still to do:
+  - `d_param_mc.ipynb`, `global_param_mc.ipynb` — Polish comment in the first cell (the environment
+    note, the same one in both).
   - `lf.ipynb` — redefines `random_seed()` locally and reuses one seed for every stage; plot titles
     on the AGB and RGB+AGB panels both say "RGB Luminosity Function"; `10` hard-coded instead of
     `m_trgb`; `m` silently changes meaning from RGB to RGB+AGB mid-notebook.
