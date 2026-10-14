@@ -18,7 +18,11 @@ uv sync
 uv run jupyter notebook   # or: jupyter lab
 ```
 
-Note: `pyproject.toml` only declares `notebook` as a dependency. Notebooks import several third-party
+The user runs JupyterLab from pipx (`~/.local/pipx/venvs/jupyterlab`), whose default `python3` kernel
+has none of the packages. The `.venv` is registered as the kernel **`mglab (.venv)`**
+(`.venv/bin/python -m ipykernel install --user --name mglab`); notebooks must use that kernel.
+
+Note: `pyproject.toml` only declares `notebook`, `pandas` and `pyarrow` as dependencies. Notebooks import several third-party
 packages (astropy, photutils, scipy, matplotlib, ephem, tqdm, jsonschema) that are installed ad hoc
 into `.venv` rather than declared in `pyproject.toml`/`uv.lock`. Don't assume the lockfile is a
 complete or accurate picture of what a given notebook needs — check the notebook's own import cells,
@@ -37,19 +41,31 @@ There are no build, lint, or test commands — nothing in the repo defines them.
     on a CMD, curve fitting, path-based region selection). `red_lmc.ipynb` is the more complete,
     later version; `lmc_cmd.ipynb` references `f_name`/`result_fname` without defining them and
     can't run standalone.
-  - `ocm_data_stats.ipynb` — counts science/flat frames per night for an annual observation report;
-    `ocm_dqc.ipynb` — data quality control, validates FITS headers against a JSON schema with
-    `jsonschema`.
   - `sky_brightness.ipynb` — sky-background vs. Moon position/phase using `ephem` and
     `astropy.coordinates`.
-  - `ffs_test.ipynb` — depends on an `ffs` module that lives in a sibling project
-    (`pyaraucaria`/`TOI`, outside this repo), not on anything checked into `mglab`. It won't import
-    unless that sibling project is also on `PYTHONPATH`.
   - `colors_trans.ipynb` — small ad hoc color-transformation snippets, Polish comments.
   - `examples.ipynb` — personal Python/astropy/Jupyter cheat-sheet (progress bars, file I/O, FITS
     I/O, coordinates), not an analysis notebook.
   - `syntax_tpg.ipynb` — currently contains unresolved git merge-conflict markers and won't parse as
     valid JSON.
+- `ocm/` — OCM observatory data-quality notebooks, working on the raw frames in
+  `/work/vela/oca/fits/<tel>/raw/<night>/` (`<night>` = `int(JD) - 2460000`; the date-named dirs there
+  are symlinks to the numbered ones). They use `pyaraucaria.ffs` (Fast FITS Statistics) from the
+  local checkout `~/src/pyaraucaria`, installed editable into `.venv` and on branch `mgorski_dev`,
+  where `ffs` is under development — results from different pyaraucaria commits may not be comparable.
+  - `ffs_scan.ipynb` — current one: runs the full FFS pipeline over the last N nights of one telescope
+    (wk06/zb08/jk15), raw frames or ofp-reduced `*_zdf.fits` (`SOURCE`), newest first, and appends one
+    row per frame (selected header cards, full header as text, all scalar `stats["frame"]`, line/star
+    counts, Moon/Sun, `ffs_version` = pyaraucaria commit) to a parquet database outside the repo,
+    `~/data/ffs_db/<tel>/` (raw) or `~/data/ffs_db/<tel>_zdf/` (chunked files; read with its
+    `load_db(tel, source)`, which keeps the last row per frame). Re-running skips frames already there.
+  - `ffs_scan.py` — the same scan as a command-line script for long unattended runs
+    (`python ffs_scan.py --telescopes zb08 --sources raw zdf --nights 15`), writing the same database.
+    Its functions are a copy of the notebook's, so a change to the measurement must go into both.
+  - `ffs_test.ipynb`, `ocm_dqc.ipynb` — older versions of the same idea, on the old `ffs` API
+    (`from ffs import FFS`, pickles of `stats` dicts). Superseded by `ffs_scan.ipynb`; the analysis
+    notebook for the new database is still to be written.
+  - `ocm_data_stats.ipynb` — counts science/flat frames per night for an annual observation report.
 - `trgb/` — Tip-of-the-Red-Giant-Branch (TRGB) distance-indicator work. See
   [`trgb/README.md`](trgb/README.md) for the theory. All reusable logic lives in `trgb_lib.py`; the
   notebooks are thin usage examples on top of it (`from trgb_lib import *`), not where the logic
@@ -120,7 +136,8 @@ Two consequences that should drive design decisions here:
 - **Running code is allowed** without asking — run notebook cells or scripts to verify a change.
   Read-only shell commands are pre-approved in `.claude/settings.local.json`.
 - **Missing packages:** install them yourself with `uv add <package>`, no need to ask.
-- **Stay in scope.** Work is scoped to `trgb/` unless the user says otherwise. Problems noticed
+- **Stay in scope.** Work is scoped to `trgb/` unless the user says otherwise (`ocm/` is the other
+  active area, when the user asks for it). Problems noticed
   elsewhere in the repo get mentioned, not fixed (e.g. `syntax_tpg.ipynb` has unresolved merge
   markers — leave it alone).
 
