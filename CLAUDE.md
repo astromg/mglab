@@ -18,15 +18,20 @@ uv sync
 uv run jupyter notebook   # or: jupyter lab
 ```
 
-The user runs JupyterLab from pipx (`~/.local/pipx/venvs/jupyterlab`), whose default `python3` kernel
-has none of the packages. The `.venv` is registered as the kernel **`mglab (.venv)`**
-(`.venv/bin/python -m ipykernel install --user --name mglab`); notebooks must use that kernel.
+JupyterLab comes with the `notebook` dependency, so `uv run jupyter lab` starts it from `.venv`. The
+`.venv` is also registered as the kernel **`mglab (.venv)`**
+(`.venv/bin/python -m ipykernel install --user --name mglab`) for a JupyterLab started from elsewhere;
+notebooks must use that kernel or the `.venv` `python3`.
 
-Note: `pyproject.toml` only declares `notebook`, `pandas` and `pyarrow` as dependencies. Notebooks import several third-party
-packages (astropy, photutils, scipy, matplotlib, ephem, tqdm, jsonschema) that are installed ad hoc
-into `.venv` rather than declared in `pyproject.toml`/`uv.lock`. Don't assume the lockfile is a
-complete or accurate picture of what a given notebook needs — check the notebook's own import cells,
-and install missing packages with `uv add <package>` when working on one that fails to import.
+`pyproject.toml` declares every third-party package the notebooks import (astropy, photutils, scipy,
+matplotlib, ephem, tqdm, jsonschema, ipywidgets for `tqdm.notebook`, pandas, pyarrow) — keep it that
+way: add new ones with `uv add <package>`, not `pip install`. The one exception is `pyaraucaria`,
+needed only by `ocm/`: it is still in a testing state (`ffs` is being developed on branch
+`mgorski_dev`), so for now it is an editable install of the local checkout `~/src/pyaraucaria` (see
+`ocm/` below) rather than a declared dependency. On a fresh machine: clone it
+(`git clone -b mgorski_dev git@github.com:araucaria-project/pyaraucaria.git ~/src/pyaraucaria`) and
+`uv pip install -e ~/src/pyaraucaria`. `uv sync` removes it, so reinstall it after every sync. Once
+pyaraucaria/`ffs` settles, make it a normal dependency in `pyproject.toml`.
 
 There are no build, lint, or test commands — nothing in the repo defines them.
 
@@ -97,7 +102,7 @@ There are no build, lint, or test commands — nothing in the repo defines them.
   cells rather than relying on static review.
 - `trgb_lib.py` is imported by notebooks via `from trgb_lib import *` with the notebook's CWD on
   `sys.path` (no package install) — keep it a flat, dependency-light module (currently only
-  `numpy`/`math`) so that pattern keeps working.
+  `numpy`/`scipy`/`math`) so that pattern keeps working.
 
 ## What the TRGB work is for
 
