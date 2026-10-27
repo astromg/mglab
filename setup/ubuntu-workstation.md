@@ -6,6 +6,14 @@ pełne TOI, JupyterLab, PyCharm i Claude Code z dostępem do vault. Źródła: o
 
 Układ katalogów jak na Macu: wszystkie repo w `~/work/src/` (TOI wymaga, żeby `tpg` leżał obok niego).
 
+## Stan i kolejność (2026-10-27)
+
+- [x] Klucz SSH wygenerowany na laptopie i dodany do GitHuba.
+- [ ] Pkt 0: test `ssh -T git@github.com`, klon mglab.
+- [ ] Od razu potem Claude Code (pkt 9, tylko instalacja i logowanie) — dalej prowadzi Claude z laptopa:
+      `cd ~/work/src/mglab && claude`, na start: „otwórz setup/ubuntu-workstation.md i prowadź mnie od pkt 1”.
+- [ ] Pkt 1–8, potem reszta pkt 9 (vault, CLAUDE.md).
+
 ## 0. Najpierw to repo
 
 Klucz SSH wygenerowany na tej maszynie i dodany w GitHub → Settings → SSH and GPG keys.
@@ -121,7 +129,13 @@ sed "s#__HOME__#$HOME#g" ~/work/src/mglab/setup/claude-global-CLAUDE.md > ~/.cla
 `setup/claude-global-CLAUDE.md` to kopia mojego globalnego `~/.claude/CLAUDE.md` z Maca (instrukcje o vault),
 z `__HOME__` zamiast ścieżki. Alternatywa: `~/work/src/knowledge-base/sync.sh onboard` wypisuje ten blok
 z właściwą ścieżką. Pamięć projektów Claude (np. przypomnienia) jest lokalna i z Maca się nie przenosi.
-Pierwsze uruchomienie: `cd ~/work/src/TOI && claude`, logowanie w przeglądarce.
+Instalacja nie wymaga sudo (program ląduje w `~/.local/bin/claude`; jeśli `claude` nie jest znalezione — nowy
+terminal albo `source ~/.bashrc`).
+
+Logowanie: `claude` → logowanie kontem Claude (to samo co na Macu, mgorski@camk.edu.pl) w przeglądarce.
+**Hasła nie ma**: claude.ai loguje kodem / linkiem wysłanym na e-mail albo przez „Continue with Google” — jak przy
+zakładaniu konta (sprawdzić na Macu: claude.ai → Settings → Account). Bez przeglądarki na laptopie `claude` wypisze
+link: otworzyć go na dowolnym urządzeniu i wkleić kod z powrotem do terminala.
 
 ## Typowe problemy
 
