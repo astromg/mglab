@@ -8,6 +8,10 @@ own shared library — see [`trgb/README.md`](trgb/README.md).
 
 ## Setup
 
+New Ubuntu workstation with OCM access (GitHub over SSH, `/data` disks, NATS, TOI, JupyterLab, PyCharm,
+Claude Code): [`setup/ubuntu-workstation.md`](setup/ubuntu-workstation.md).
+
+
 ```
 python3 -m venv .venv
 source .venv/bin/activate
