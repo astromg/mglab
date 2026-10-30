@@ -235,7 +235,7 @@ Two consequences that should drive design decisions here:
 - **Next**: the clear reference frame study (`allsky_diff.py`: ageing, cloudy night
   start, join the marks?); a Sun term in zp_clear.
 - **This machine**: `~/src/pyaraucaria` missing, so `ocm/ffs_*` cannot run. Old study material in `~/data/allsky/attic/`.
-  Nothing committed in mglab: `ocm/allsky/` untracked, `CLAUDE.md`, `pyproject.toml`, `uv.lock` modified.
+  mglab `ocm/allsky/` committed and pushed 2026-10-30 at the user's request (8e9fa6b); `ocm/allsky/.idea/` left out.
 
 ### `trgb/` (unchanged since 2026-08-11)
 
