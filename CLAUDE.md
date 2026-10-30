@@ -24,7 +24,7 @@ JupyterLab comes with the `notebook` dependency, so `uv run jupyter lab` starts 
 notebooks must use that kernel or the `.venv` `python3`.
 
 `pyproject.toml` declares every third-party package the notebooks import (astropy, photutils, scipy,
-matplotlib, ephem, tqdm, jsonschema, ipywidgets for `tqdm.notebook`, pandas, pyarrow) — keep it that
+matplotlib, ephem, tqdm, jsonschema, ipywidgets for `tqdm.notebook`, pandas, pyarrow, nats-py for `ocm/allsky/fetch_nats.py`) — keep it that
 way: add new ones with `uv add <package>`, not `pip install`. The one exception is `pyaraucaria`,
 needed only by `ocm/`: it is still in a testing state (`ffs` is being developed on branch
 `mgorski_dev`), so for now it is an editable install of the local checkout `~/src/pyaraucaria` (see
@@ -71,6 +71,40 @@ There are no build, lint, or test commands — nothing in the repo defines them.
     (`from ffs import FFS`, pickles of `stats` dicts). Superseded by `ffs_scan.ipynb`; the analysis
     notebook for the new database is still to be written.
   - `ocm_data_stats.ipynb` — counts science/flat frames per night for an annual observation report.
+  - `allsky/` — cloud detection on the OCM allsky camera archive `/data/misc/allsky/<YYYYMMDD>/<YYYYMMDD>_HHMM.jpg`
+    (NFS; UT names, ~2.4 min cadence at night, 1240x1256 JPG, effectively greyscale, burned-in overlays).
+    - `allsky_lib.py` — the deliverable, to be lifted into the cloud service (conventions of `trgb_lib.py`: docstrings,
+      `raise ValueError`). Frame access, camera model (`CAMERA_PARAMS`), masks, derotation, star measurement and the
+      clear-sky expectation, and the method: `SkyAnalyzer.analyse` (one frame: `transp`, `star_seen`, `diff_ls_n`, star
+      maps, difference map, `detections`) and `StateTracker` (state in time, `veil`); `detections(..., veil)` gives the
+      observers' marks `sure` (red) and `possible` (yellow). Rebuilt 2026-10-29 (segments and old indicators removed,
+      one star pass and one derotation per frame, ~0.8 s; values identical to before).
+    - `allsky_case.ipynb` — the current notebook: one case (a run of frames, chosen in `CASES`) animated: the frame with
+      the marks, the raw difference and the expected stars with their own detections, indicators + areas with the state
+      band. `CASE = "live"` = the newest frames.
+    - `allsky_regions.py` — study around the method: `RegionAnalyzer` (analyser + tracker + table row), whole nights into
+      `~/data/allsky/regions/<night>.{parquet,npz,png}` (`nights`, `plot`), drawing (`draw*`), the report's `cases`, and
+      the check against the telescopes (`telescopes` → `regions/telescopes.parquet`, `marks`).
+    - `allsky_diff.py` — study: the difference against a clear reference frame (`reference`; one run ≤ 1 h, it keeps every
+      frame in memory).
+    - `allsky_calib.py` — optional clear-sky star calibration from nights the user declares clear →
+      `~/data/allsky/calib/allsky_calib.npz`; by hand after cleaning or a camera change.
+    - `allsky_camera.py` — fits `CAMERA_PARAMS` on bright stars of clear frames; once per camera.
+    - `allsky_report.py` — the HTML report of the method as it is now → `~/data/allsky/report/allsky_report.html`.
+    - `fetch_nats.py` — downloads (read-only, NATS keeps 30 days) the telescopes' zero points and raw-frame pointings into
+      `~/data/allsky/nats/`.
+    - `~/data/allsky/attic/` — the study up to 2026-10-29 (old report HTML and scripts, `allsky_cache.py`; caches in
+      `~/data/allsky/cache/`). Not used any more.
+    - **Memory**: never build an astropy `Time` from a string without `format=` in per-frame code — astropy guesses the
+      format by raising and catching exceptions, whose tracebacks keep the callers' frames (with the full images) in
+      reference cycles (+36 MB per frame). Closed matplotlib figures need `gc.collect()`. Run heavy jobs one at a time,
+      capped (`systemd-run --user --scope -p MemoryMax=6G ...`): two parallel runs OOM-crashed the laptop on 2026-10-29.
+    - Times: sky positions from the file name (`frame_time`); intervals between frames from the mtimes (`frame_mtime`,
+      off by 15-220 s as an absolute time).
+    - Agreed with the user: reading many frames is discussed first; batches of nights are reported before going on.
+    - The service `allsky_overwatch` lives in the oca_overwatch repo (v2 on this library, on `master`, not yet deployed);
+      requirements in the vault note `Projects/Automation/allsky_overwatch.md`; image / mask storage is a question for
+      majkelx (vault `Inbox/For majkelx — allsky_overwatch image storage (2026-10-28).md`).
 - `trgb/` — Tip-of-the-Red-Giant-Branch (TRGB) distance-indicator work. See
   [`trgb/README.md`](trgb/README.md) for the theory. All reusable logic lives in `trgb_lib.py`; the
   notebooks are thin usage examples on top of it (`from trgb_lib import *`), not where the logic
@@ -160,7 +194,50 @@ Two consequences that should drive design decisions here:
   have already computed and understood. Propose such a change and wait for a yes; the same goes for
   quietly swapping the method behind an existing function.
 
-## Current state (last updated: 2026-08-11)
+## Current state (last updated: 2026-10-30)
+
+### `ocm/allsky/` — cloud detection (sessions of 2026-10-27..30)
+
+- **The method is settled and documented** (`allsky_lib.py`, report `~/data/allsky/report/allsky_report.html`): stars
+  expected from the frame's own zero point (optional calibration) → `transp`, `star_seen`, star maps; derotated difference
+  → `diff_ls_n`, difference regions; `StateTracker` → clear / thin / cloudy / overcast + **veil** (transp below thin while
+  star_seen ≥ 0.8); `zp_clear` **learned** (median of clear-looking frames, 14 nights; (9.03, −2.45) on Oct 2026 vs the
+  hand fit (8.95, −2.10)) — to be watched for two weeks and checked back. Marks (user): red = hides everything (star sure,
+  or difference sure only where stars cannot tell), yellow = cirrus / uncertain / whole sky under a veil, light cyan area = Moon.
+  Fixed segments dropped for good. Checked on ten nights and against the telescopes (report 3–4); levels kept (too few
+  cloudy telescope points to tune).
+- **Service `allsky_overwatch` v2 in production on services01 since 2026-10-30** (unit `oca_allsky_overwatch`, run as
+  poweruser; the user updates it himself: `git pull`, restart). Publishes `…allsky_overwatch.clouds` per night frame (state, veil,
+  marks shares, indicators, `zp_coeffs`, `files`); messages on `tic.status.ocm.messages` only when the sky gets worse /
+  clears: thin/veil → `CLOUDS INFO`, cloudy → `CLOUDS WARNING`, overcast → `CLOUDS ALERT`, clear → `INFO`; `CLOUDS INFO`
+  "<tel> is pointing into (thick) clouds" for an observing telescope in yellow/red. Display pictures (not an archive) for
+  the last 10 frames in `/data/misc/oca_overwatch/allsky/` (dir made by the user, poweruser 775): `_marks.png` (codes 0–3),
+  `_stars.jpg`, `_diff.jpg` (on the frame itself: star rings, difference blended in colour; Moon = light cyan area, the
+  whole circle above the horizon). `marks` shares in the message exclude the veil (flag `veil`); `telescopes` field =
+  where each observing telescope points (red / yellow / null). zp history `~/.local/state/allsky_overwatch/`, seeded
+  from the repo. Memory flat so far (the user watches it for a few days). All committed and pushed (oca_overwatch
+  `master` 1b159bb); services01 needs `git pull` + restart for the latest commits.
+- **Around it, all committed and pushed (2026-10-30)**: TOI (`main` d1e0fa4): field Clouds (one word, grey / yellow /
+  orange / red), lamp ALLSKY OW, colours of the CLOUDS labels, cloud icon in the telescope table. weather_overwatch's
+  zero point dated by `meta.ts` (zero_monitor arrives 5–45 min late). oca_monitor (`master` bd6fc45): mask overlay on the
+  allsky page, tabs AllskyStars / AllskyDiff out of the rotation, page **Sky** in panel 02 (clouds, phot_zero, fwhm;
+  Weather keeps wind, temperature, humidity, power), chart `clouds` (state band — veil hatched —, yellow / red sky
+  shares, current-time line), TOI's icons in the telescope table incl. the cloud. Convention (user): allsky pictures
+  shown as the camera takes them (north turned by theta from the burned-in N/E/S/W); telescope dots and the wind
+  arrow follow the camera model. Sounds for the CLOUDS labels (`pages/message.py`) still the user's to pick.
+- **Tone curve (2026-10-30, in mglab `allsky_lib.py` only — the service copy now differs)**: false star marks next to the
+  Moon come from the JPEG tone curve (a star on a brighter background looks up to ~1 mag fainter). `RESPONSE_BKG` /
+  `RESPONSE_DIM` + `response_dim` (relative to the zero point's stars: zp / transp unchanged) in `star_expectation(dim=)`
+  and the star dim map; measured on clear twilights during telescope flats and clear moonlit nights (they agree).
+  Checked on 10-27/29/30 (half of the yellow near the Moon gone, red gone, cloudy night ~-12 % yellow). Study scripts in
+  the session scratchpad only. To do: whole nights + report, then copy to the service; learn the curve automatically from
+  flat twilights; maybe ring noise around the Moon for the rest.
+- **Next**: the clear reference frame study (`allsky_diff.py`: ageing, cloudy night
+  start, join the marks?); a Sun term in zp_clear.
+- **This machine**: `~/src/pyaraucaria` missing, so `ocm/ffs_*` cannot run. Old study material in `~/data/allsky/attic/`.
+  Nothing committed in mglab: `ocm/allsky/` untracked, `CLAUDE.md`, `pyproject.toml`, `uv.lock` modified.
+
+### `trgb/` (unchanged since 2026-08-11)
 
 - **Only the LPED chain is under active development**: `fit_alpha_mle` → `local_poisson_filter` →
   `detect_local_peak`. Sobel / GLOESS / MLA sit in `trgb_lib.py` for comparison only — don't spend

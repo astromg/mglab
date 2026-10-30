@@ -9,6 +9,7 @@ dependencies = [
     "ipywidgets>=8.1.9",
     "jsonschema>=4.26.0",
     "matplotlib>=3.11.2",
+    "nats-py>=2.16.0",
     "notebook>=7.5.3",
     "pandas>=3.0.6",
     "photutils>=3.1.1",
