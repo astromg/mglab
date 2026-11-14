@@ -13,7 +13,11 @@ dependencies = [
     "notebook>=7.5.3",
     "pandas>=3.0.6",
     "photutils>=3.1.1",
+    "pyaraucaria",
     "pyarrow>=26.0.0",
     "scipy>=1.18.1",
     "tqdm>=4.70.1",
 ]
+
+[tool.uv.sources]
+pyaraucaria = { path = "../pyaraucaria", editable = true }

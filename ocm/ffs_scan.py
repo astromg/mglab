@@ -148,7 +148,10 @@ def measure(path, telescope, imagetypes=None):
                 ffs.mk_stats()
                 ffs.sky_gradient()
             if ffs.frame_used_stars >= 5:
-                ffs.calc_star_field_stats()
+                try:
+                    ffs.calc_star_field_stats()     # psf_pattern: linear / radial / tangential / none
+                except ValueError:
+                    pass                            # < 5 gwiazd w oknie shape - bez statystyk pola
 
         for key, v in ffs.stats["frame"].items():
             row[key] = v.tolist() if isinstance(v, np.ndarray) else v
@@ -169,7 +172,10 @@ def measure(path, telescope, imagetypes=None):
     return row
 
 
-COLS = f"{'file':26s} {'type':8s} {'object':16s} {'flt':4s} {'exp':>6s} {'sky':>7s} {'grad':>7s} {'lines':>5s} {'stars':>5s} {'fwhm':>5s} {'fw\"':>5s} {'ell':>5s} {'e_t':>6s} {'moon':>5s} {'t[s]':>5s}"
+COLS = f"{'file':26s} {'type':8s} {'object':16s} {'flt':4s} {'exp':>6s} {'sky':>7s} {'grad':>7s} {'lines':>5s} {'stars':>5s} {'fwhm':>5s} {'fw\"':>5s} {'ell':>5s} {'pat':>4s} {'pat_s':>5s} {'moon':>5s} {'t[s]':>5s}"
+
+
+PATTERN_ABBR = {"linear": "lin", "radial": "rad", "tangential": "tan", "none": "none"}
 
 
 def fmt(x, f):
@@ -183,7 +189,7 @@ def show(r):
         return f"{r['file']:26s} ERROR {r['error']}"
     return (f"{r['file']:26s} {str(r['IMAGETYP'])[:8]:8s} {str(r['OBJECT'])[:16]:16s} {str(r['FILTER'])[:4]:4s} {fmt(r['EXPTIME'], '6.1f')} "
             f"{fmt(r.get('median'), '7.0f')} {fmt(r.get('bkg_frame_gradient'), '7.1f')} {r['n_lines']:5d} {r['n_stars']:5d} "
-            f"{fmt(r.get('fwhm'), '5.2f')} {fmt(r.get('fwhm_arcsec'), '5.2f')} {fmt(r.get('ellipticity'), '5.2f')} {fmt(r.get('psf_e_t'), '6.3f')} "
+            f"{fmt(r.get('fwhm'), '5.2f')} {fmt(r.get('fwhm_arcsec'), '5.2f')} {fmt(r.get('ellipticity'), '5.2f')} {PATTERN_ABBR.get(r.get('psf_pattern'), '-'):>4s} {fmt(r.get('psf_pattern_s'), '5.2f')} "
             f"{fmt(r.get('moon_alt'), '5.0f')} {r['ffs_time']:5.1f}")
 
 

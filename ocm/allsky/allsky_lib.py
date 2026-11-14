@@ -1274,12 +1274,15 @@ class StateTracker:
     limits : dict
         As STATE_LIMITS.
     sun_max : float
-        Above this Sun altitude [deg] the result is marked twilight (zp_clear has no Sun term).
+        Above this Sun altitude [deg] the frame is twilight: marked so and kept out of the smoothing (clouds are not
+        measured then). -18: in the evening the camera's auto exposure lags behind the darkening sky and the zero point
+        of a clear sky climbs for ~1.5 mag until the Sun is at about -18 (5 evenings of 2026-10); zp_clear has no Sun
+        term.
     max_gap : float
         A gap longer than this [s] between frames resets the history.
     """
 
-    def __init__(self, n_transp=3, n_diff=2, limits=STATE_LIMITS, sun_max=-16.0, max_gap=600.0):
+    def __init__(self, n_transp=3, n_diff=2, limits=STATE_LIMITS, sun_max=-18.0, max_gap=600.0):
         if n_transp < 1 or n_diff < 1:
             raise ValueError("smoothing lengths must be >= 1")
         self.n_transp, self.n_diff, self.limits, self.sun_max, self.max_gap = n_transp, n_diff, limits, sun_max, max_gap
@@ -1309,9 +1312,11 @@ class StateTracker:
         if self.last_t is not None and (t - self.last_t).sec > self.max_gap:
             self.transp, self.seen, self.diff = [], [], []
         self.last_t = t
-        self.transp = (self.transp + [transp])[-self.n_transp:]
-        self.seen = (self.seen + [star_seen])[-self.n_transp:]
-        self.diff = (self.diff + [diff_ls_n])[-self.n_diff:]
+        twilight = bool(sun_alt > self.sun_max)
+        if not twilight:        # twilight frames would drag the first night frames down
+            self.transp = (self.transp + [transp])[-self.n_transp:]
+            self.seen = (self.seen + [star_seen])[-self.n_transp:]
+            self.diff = (self.diff + [diff_ls_n])[-self.n_diff:]
         smooth = lambda a: np.nanmedian(a) if np.isfinite(a).sum() > len(a) / 2 else np.nan
         transp_s, seen_s = smooth(np.array(self.transp, dtype=float)), smooth(np.array(self.seen, dtype=float))
         d = np.array(self.diff, dtype=float)
@@ -1319,7 +1324,7 @@ class StateTracker:
         with np.errstate(invalid="ignore"):
             veil = bool(transp_s < self.limits["thin_transp"] + self.limits["thin_transp_moon"] * moon and seen_s >= VEIL_SEEN)
         return dict(state=sky_state(transp_s, diff_s, self.limits, moon), transp_s=transp_s, diff_s=diff_s, star_seen_s=seen_s,
-                    twilight=bool(sun_alt > self.sun_max), veil=veil)
+                    twilight=twilight, veil=veil)
 
 
 # ---------------------------------------------------------------- pictures for display (numpy only, frame geometry)
@@ -1351,10 +1356,26 @@ def _outline(rgb, mask, colour, width=2):
     rgb[edge] = colour
 
 
-def render_stars(img, st, det, sky, moon):
+VEIL_RING_ALT = 30.0        # deg; a veil is shown as a dashed yellow circle at this altitude (the edge of the sky analysed)
+
+
+def _veil_ring(rgb, params=CAMERA_PARAMS, alt=VEIL_RING_ALT, colour=(255, 230, 0), dash=6.0, r=3):
+    """Paint a dashed circle at altitude `alt` onto rgb: dashes `dash` deg of azimuth long, `r` px thick."""
+    az = np.arange(0.0, 360.0, 0.25)
+    az = az[(az // dash) % 2 == 0]
+    x, y = altaz_to_xy(np.full(az.shape, alt), az, params)
+    for dx in range(-r // 2, r // 2 + 1):
+        for dy in range(-r // 2, r // 2 + 1):
+            xi, yi = np.round(x).astype(int) + dx, np.round(y).astype(int) + dy
+            ok = (xi >= 0) & (xi < rgb.shape[1]) & (yi >= 0) & (yi < rgb.shape[0])
+            rgb[yi[ok], xi[ok]] = colour
+
+
+def render_stars(img, st, det, sky, moon, veil=False):
     """Picture of the star method on the frame itself, as big as the frame: the expected stars ringed, green seen, red
-    missing (larger rings = the sure ones), the star-map regions outlined (yellow possible, red sure) and the Moon mask
-    as a light cyan area, drawn as given (e.g. clipped to above the horizon, not to the sky analysed).
+    missing (larger rings = the sure ones), the star-map regions outlined (yellow possible, red sure), the Moon mask
+    as a light cyan area, drawn as given (e.g. clipped to above the horizon, not to the sky analysed), and a veil as a
+    dashed yellow circle at VEIL_RING_ALT (so that it does not cover the frame).
 
     Parameters
     ----------
@@ -1368,6 +1389,8 @@ def render_stars(img, st, det, sky, moon):
         Full-resolution sky (SkyAnalyzer.sky).
     moon : numpy.ndarray of bool
         Full-resolution Moon area to draw (the star map's Moon mask, moon_stars, or a part of it).
+    veil : bool
+        A veil over the whole sky (StateTracker): the dashed circle.
 
     Returns
     -------
@@ -1385,14 +1408,17 @@ def render_stars(img, st, det, sky, moon):
             rgb[box][(d2 >= (r - 1) ** 2) & (d2 <= (r + 0.5) ** 2)] = (0, 230, 0) if seen else (255, 40, 40)
     _outline(rgb, det["star_possible"], (255, 230, 0))
     _outline(rgb, det["star_sure"], (230, 0, 0))
+    if veil:
+        _veil_ring(rgb)
     return rgb
 
 
-def render_diff(img, diff, noise, det, sky, moon):
+def render_diff(img, diff, noise, det, sky, moon, veil=False):
     """Picture of the difference method on the frame itself, as big as the frame: the derotated difference blended in
     colour, the more opaque the stronger the change (red = brighter than the previous frame, blue = darker; below 1.5
-    pixel noises nothing, full colour at 6), the difference regions outlined (yellow possible, black sure) and the Moon
-    mask as a light cyan area, drawn as given (e.g. clipped to above the horizon, not to the sky analysed).
+    pixel noises nothing, full colour at 6), the difference regions outlined (yellow possible, red sure), the Moon
+    mask as a light cyan area, drawn as given (e.g. clipped to above the horizon, not to the sky analysed), and a veil
+    as a dashed yellow circle at VEIL_RING_ALT.
 
     Parameters
     ----------
@@ -1406,6 +1432,8 @@ def render_diff(img, diff, noise, det, sky, moon):
         detections.
     sky, moon : numpy.ndarray of bool
         Full-resolution sky and the Moon area to draw (the difference's Moon mask, moon_diff, or a part of it).
+    veil : bool
+        A veil over the whole sky (StateTracker): the dashed circle.
 
     Returns
     -------
@@ -1421,5 +1449,7 @@ def render_diff(img, diff, noise, det, sky, moon):
         rgb[on] = ((1 - a) * rgb[on] + a * colour).astype(np.uint8)
     _fill(rgb, moon[::GRID, ::GRID], (0, 220, 230), 0.3)
     _outline(rgb, det["diff_possible"], (255, 200, 0))
-    _outline(rgb, det["diff_sure"], (0, 0, 0))
+    _outline(rgb, det["diff_sure"], (230, 0, 0))
+    if veil:
+        _veil_ring(rgb)
     return rgb

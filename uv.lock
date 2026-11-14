@@ -89,6 +89,18 @@ wheels = [
 ]
 
 [[package]]
+name = "astroplan"
+version = "0.10.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "astropy" },
+    { name = "numpy" },
+    { name = "pytz" },
+    { name = "six" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/48/80/1be3af06717245a51adaf6994b682b3ee25ace9bfe5d443d440209d627df/astroplan-0.10.1.tar.gz", hash = "sha256:39d97c3377e1630abff3a94d8c956980f77a3e809e27a0376dd7d30abe3b6959", size = 140603, upload-time = "2024-08-13T20:12:04.462Z" }
+
+[[package]]
 name = "astropy"
 version = "8.0.2"
 source = { registry = "https://pypi.org/simple" }
@@ -1239,6 +1251,7 @@ dependencies = [
     { name = "notebook" },
     { name = "pandas" },
     { name = "photutils" },
+    { name = "pyaraucaria" },
     { name = "pyarrow" },
     { name = "scipy" },
     { name = "tqdm" },
@@ -1255,6 +1268,7 @@ requires-dist = [
     { name = "notebook", specifier = ">=7.5.3" },
     { name = "pandas", specifier = ">=3.0.6" },
     { name = "photutils", specifier = ">=3.1.1" },
+    { name = "pyaraucaria", editable = "../pyaraucaria" },
     { name = "pyarrow", specifier = ">=26.0.0" },
     { name = "scipy", specifier = ">=1.18.1" },
     { name = "tqdm", specifier = ">=4.70.1" },
@@ -1716,6 +1730,36 @@ wheels = [
 ]
 
 [[package]]
+name = "pyaraucaria"
+version = "2.14.5"
+source = { editable = "../pyaraucaria" }
+dependencies = [
+    { name = "astroplan" },
+    { name = "astropy" },
+    { name = "jsonschema" },
+    { name = "lark" },
+    { name = "matplotlib" },
+    { name = "numpy" },
+    { name = "scipy" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "astroplan" },
+    { name = "astropy" },
+    { name = "jsonschema" },
+    { name = "lark" },
+    { name = "matplotlib" },
+    { name = "numpy" },
+    { name = "pyyaml", marker = "extra == 'yaml'" },
+    { name = "scipy" },
+]
+provides-extras = ["yaml", "dev"]
+
+[package.metadata.requires-dev]
+dev = []
+
+[[package]]
 name = "pyarrow"
 version = "26.0.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1829,6 +1873,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/29/bf/eca6a3d43db1dae7070f70e160ab20b807627ba953663ba07928cdd3dc58/python_json_logger-4.0.0.tar.gz", hash = "sha256:f58e68eb46e1faed27e0f574a55a0455eecd7b8a5b88b85a784519ba3cff047f", size = 17683, upload-time = "2025-10-06T04:15:18.984Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/51/e5/fecf13f06e5e5f67e8837d777d1bc43fac0ed2b77a676804df5c34744727/python_json_logger-4.0.0-py3-none-any.whl", hash = "sha256:af09c9daf6a813aa4cc7180395f50f2a9e5fa056034c9953aec92e381c5ba1e2", size = 15548, upload-time = "2025-10-06T04:15:17.553Z" },
+]
+
+[[package]]
+name = "pytz"
+version = "2026.6"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/f5/b0/168030b0bfcc334cf09fa3313afdb888d892c8a0027324683d1de0ec277e/pytz-2026.6.tar.gz", hash = "sha256:3b0fc2727707663d6e517936f444fd8a8b240f1fc32f4bf7ee03274245945284", size = 318520, upload-time = "2026-10-29T09:05:47.011Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b6/25/564f3fc5b70c1398d706c51f2b1470d0ea0b1b2f96fee67877b6f5bdf3b6/pytz-2026.6-py2.py3-none-any.whl", hash = "sha256:7fed3fee8fd6bd4a2b7b75a8d56021d0624127bf69bd5691f115db929ac570b3", size = 506321, upload-time = "2026-10-29T09:05:45.14Z" },
 ]
 
 [[package]]
